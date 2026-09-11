@@ -168,6 +168,13 @@
   <div id="timesBox" style="display:none"><label class="f">週あたりの回数</label><input type="number" id="fTimes" min="1" max="7" value="3"></div>
   <label class="f">開始日</label>
   <input type="date" id="fStart">
+  <label class="f">通知</label>
+  <div class="chips" id="fRemindMode">
+    <button class="chip" data-r="default">全体の設定に従う</button>
+    <button class="chip" data-r="custom">時刻を指定</button>
+    <button class="chip" data-r="off">通知しない</button>
+  </div>
+  <div id="remindBox" style="display:none"><label class="f">この習慣の通知時刻</label><input type="time" id="fRemindTime" value="08:00"></div>
   <div class="btns">
     <button class="btn ghost" id="editCancel">やめる</button>
     <button class="btn" id="editSave">保存する</button>
@@ -201,9 +208,9 @@
   <h2>設定とデータ</h2>
 
   <div class="sec-label">通知</div>
-  <p class="note" style="margin:0 0 6px">ホーム画面に追加したうえで許可すると、決めた時刻に未達成の習慣を知らせます。サーバーを使わない設定では、通知はアプリを開いている間だけ出ます（iOSの制約）。</p>
+  <p class="note" style="margin:0 0 6px">ホーム画面に追加したうえで許可すると、決めた時刻に未達成の習慣を知らせます。ここで決めるのは既定の時刻で、習慣ごとの編集画面から個別の時刻にも変えられます。サーバーを使わない設定では、通知はアプリを開いている間だけ出ます（iOSの制約）。</p>
   <div class="two">
-    <div><label class="f">通知する時刻</label><input type="time" id="fRemind" value="21:00"></div>
+    <div><label class="f">既定の通知時刻</label><input type="time" id="fRemind" value="21:00"></div>
     <div><label class="f">&nbsp;</label><button class="btn ghost" id="btnNotify">通知を許可する</button></div>
   </div>
   <p class="note" id="notifyState"></p>
@@ -273,7 +280,7 @@
         if(mode==='local') localStorage.setItem(KEY,json);
         else if(window.storage) await window.storage.set(KEY,json);
       }catch(e){ toast('保存できませんでした。データ画面から控えを取ってください'); }
-      updateBadge();
+      updateBadge(); scheduleReminder();
     },250);
   }
 
@@ -401,7 +408,7 @@
     const em=document.createElement('div'); em.className='emoji';
     em.style.background=h.color+'1A'; em.style.color=h.color; em.textContent=h.emoji||'✓';
     const meta=document.createElement('button'); meta.className='meta';
-    meta.innerHTML=`<div class="name">${esc(h.name)}</div><div class="sub">${freqText(h)}${h.goalType==='count'?` ・ 1日${g}${esc(h.unit||'回')}`:''}${st.n?` ・ ${st.n}${st.unit}連続`:''}</div>`;
+    meta.innerHTML=`<div class="name">${esc(h.name)}</div><div class="sub">${freqText(h)}${h.goalType==='count'?` ・ 1日${g}${esc(h.unit||'回')}`:''}${h.remind&&h.remind!=='off'?` ・ 🔔${h.remind}`:''}${st.n?` ・ ${st.n}${st.unit}連続`:''}</div>`;
     meta.onclick=()=>openDetail(h.id);
     const btn=document.createElement('button');
     btn.className='check'+(d?' on':(v>0?' part':''));
@@ -476,19 +483,22 @@
 
   /* ── 編集 ── */
   const F={name:'fName',emoji:'fEmoji',target:'fTarget',unit:'fUnit',times:'fTimes',start:'fStart'};
-  let form={color:COLORS[0],goalType:'done',freq:'daily',dows:[1,2,3,4,5]};
+  let form={color:COLORS[0],goalType:'done',freq:'daily',dows:[1,2,3,4,5],remindMode:'default'};
   function openEdit(id){
     editing=id;
     const h=id?state.habits.find(x=>x.id===id):null;
     document.getElementById('editTitle').textContent=h?'習慣を編集':'習慣を追加';
     document.getElementById('editDelete').style.display=h?'block':'none';
-    form={color:h?h.color:COLORS[0], goalType:h?h.goalType:'done', freq:h?h.freq:'daily', dows:h&&h.dows?h.dows.slice():[1,2,3,4,5]};
+    const rm=h?(h.remind==='off'?'off':(h.remind?'custom':'default')):'default';
+    form={color:h?h.color:COLORS[0], goalType:h?h.goalType:'done', freq:h?h.freq:'daily',
+      dows:h&&h.dows?h.dows.slice():[1,2,3,4,5], remindMode:rm};
     document.getElementById(F.name).value=h?h.name:'';
     document.getElementById(F.emoji).value=h?h.emoji:'✓';
     document.getElementById(F.target).value=h&&h.target?h.target:3;
     document.getElementById(F.unit).value=h&&h.unit?h.unit:'回';
     document.getElementById(F.times).value=h&&h.times?h.times:3;
     document.getElementById(F.start).value=h?h.start:key(today());
+    document.getElementById('fRemindTime').value=(rm==='custom')?h.remind:(state.settings.remind||'21:00');
     syncForm(); openSheet('editSheet');
     if(!h) setTimeout(()=>document.getElementById(F.name).focus(),120);
   }
@@ -496,10 +506,12 @@
     document.querySelectorAll('#fColors .chip').forEach(c=>c.classList.toggle('on',c.dataset.c===form.color));
     document.querySelectorAll('#fGoal .chip').forEach(c=>c.classList.toggle('on',c.dataset.g===form.goalType));
     document.querySelectorAll('#fFreq .chip').forEach(c=>c.classList.toggle('on',c.dataset.f===form.freq));
+    document.querySelectorAll('#fRemindMode .chip').forEach(c=>c.classList.toggle('on',c.dataset.r===form.remindMode));
     document.querySelectorAll('#fDows .chip').forEach(c=>c.classList.toggle('on',form.dows.includes(+c.dataset.d)));
     document.getElementById('countBox').style.display=form.goalType==='count'?'block':'none';
     document.getElementById('dowBox').style.display=form.freq==='weekdays'?'block':'none';
     document.getElementById('timesBox').style.display=form.freq==='weekly'?'block':'none';
+    document.getElementById('remindBox').style.display=form.remindMode==='custom'?'block':'none';
   }
   function saveHabit(){
     const name=document.getElementById(F.name).value.trim();
@@ -509,7 +521,9 @@
       goalType:form.goalType, target:Math.max(1,+document.getElementById(F.target).value||1),
       unit:document.getElementById(F.unit).value.trim()||'回',
       freq:form.freq, dows:form.dows.slice().sort(), times:Math.max(1,+document.getElementById(F.times).value||1),
-      start:document.getElementById(F.start).value||key(today())
+      start:document.getElementById(F.start).value||key(today()),
+      remind: form.remindMode==='custom' ? (document.getElementById('fRemindTime').value||null)
+            : form.remindMode==='off' ? 'off' : null
     };
     if(form.freq==='weekdays'&&!data.dows.length){toast('曜日を1つ以上選んでください'); return;}
     if(editing){Object.assign(state.habits.find(x=>x.id===editing),data);}
@@ -536,6 +550,7 @@
       b.onclick=()=>{form.dows=form.dows.includes(i)?form.dows.filter(x=>x!==i):form.dows.concat(i); syncForm();}; dw.appendChild(b);});
     document.querySelectorAll('#fGoal .chip').forEach(c=>c.onclick=()=>{form.goalType=c.dataset.g; syncForm();});
     document.querySelectorAll('#fFreq .chip').forEach(c=>c.onclick=()=>{form.freq=c.dataset.f; syncForm();});
+    document.querySelectorAll('#fRemindMode .chip').forEach(c=>c.onclick=()=>{form.remindMode=c.dataset.r; syncForm();});
     const em=document.getElementById(F.emoji);
     em.onfocus=()=>{ if(em.value==='✓') em.select(); };
     em.setAttribute('list','emo');
@@ -597,25 +612,56 @@
     }catch(e){}
   }
   let remindTimer=null;
+  const fired=new Set();                       // 同じ時刻に二重で出さないための記録
+  function remindTimeOf(h){
+    if(h.remind==='off') return null;
+    return h.remind || state.settings.remind || null;
+  }
+  // 「時刻 → その時刻に知らせる習慣」の組を作る
+  function groupsForToday(){
+    const t=today(), g={};
+    state.habits.filter(h=>!h.archived&&isTargetDay(h,t)).forEach(h=>{
+      const tm=remindTimeOf(h); if(!tm) return;
+      (g[tm]=g[tm]||[]).push(h);
+    });
+    return g;
+  }
   function scheduleReminder(){
     clearTimeout(remindTimer);
-    const hhmm=state.settings.remind; if(!hhmm) return;
     if(!('Notification' in window)||Notification.permission!=='granted') return;
-    const [h,m]=hhmm.split(':').map(Number);
-    const now=new Date(); const at=new Date(now); at.setHours(h,m,0,0);
-    if(at<=now) at.setTime(at.getTime()+864e5);
-    remindTimer=setTimeout(()=>{ fireReminder(); scheduleReminder(); }, at-now);
+    const now=new Date(), g=groupsForToday();
+    const times=Object.keys(g).sort();
+    let target=null, list=null;
+    for(const tm of times){
+      const [h,m]=tm.split(':').map(Number);
+      const at=new Date(now); at.setHours(h,m,0,0);
+      if(at>now && !fired.has(key(now)+'@'+tm)){ target=at; list=tm; break; }
+    }
+    if(!target){                                // 今日の分は終わり。明日の最も早い時刻に合わせる
+      const all=[...new Set(state.habits.filter(h=>!h.archived).map(remindTimeOf).filter(Boolean))].sort();
+      if(!all.length) return;
+      const [h,m]=all[0].split(':').map(Number);
+      target=new Date(now); target.setDate(target.getDate()+1); target.setHours(h,m,0,0);
+      list=null;
+    }
+    remindTimer=setTimeout(()=>{
+      if(list){ fired.add(key(new Date())+'@'+list); fireReminder(groupsForToday()[list]||[]); }
+      scheduleReminder();
+    }, Math.max(500, target-now));
   }
-  async function fireReminder(){
-    const left=pendingToday();
+  async function fireReminder(habits){
+    const t=today();
+    const left=(habits||[]).filter(h=>!done(h,t));
     if(!left.length) return;
-    const body=left.slice(0,4).map(h=>(h.emoji||'')+h.name).join('、')+(left.length>4?` ほか${left.length-4}件`:'');
+    const title = left.length===1 ? `${left[0].emoji||''}${left[0].name}` : `今日はあと${left.length}件`;
+    const body  = left.length===1 ? 'まだ記録がありません'
+                : left.slice(0,4).map(h=>(h.emoji||'')+h.name).join('、')+(left.length>4?` ほか${left.length-4}件`:'');
     const opt={body, tag:'habit-remind', icon:'icon-192.png', badge:'icon-192.png'};
     try{
       const reg=await navigator.serviceWorker.getRegistration();
-      if(reg) reg.showNotification(`今日はあと${left.length}件`,opt);
-      else new Notification(`今日はあと${left.length}件`,opt);
-    }catch(e){ try{ new Notification(`今日はあと${left.length}件`,opt); }catch(e2){} }
+      if(reg) reg.showNotification(title,opt);
+      else new Notification(title,opt);
+    }catch(e){ try{ new Notification(title,opt); }catch(e2){} }
   }
   function notifyState(){
     const el=document.getElementById('notifyState');
